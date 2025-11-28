@@ -58,8 +58,10 @@ if ! command -v curl &> /dev/null; then
     pacman -S --noconfirm curl &> /dev/null
 fi
 
-# Настройка логирования
-exec > >(tee -a ${LOG_FILE}) 2>&1
+# Функция для логирования (используется вместо exec)
+log() {
+    echo "$@" >> ${LOG_FILE}
+}
 
 # Очистка экрана и подготовка
 clear
@@ -149,11 +151,13 @@ set_language() {
 
 # Показ сообщения
 show_msg() {
+    log "MSG: $1"
     dialog --backtitle "${TXT[BACKTITLE]}" --title "${TXT[TITLE]}" --msgbox "$1" 10 50
 }
 
 # Показ вопроса (Да/Нет)
 show_yesno() {
+    log "YESNO: $1"
     dialog --backtitle "${TXT[BACKTITLE]}" --title "${TXT[TITLE]}" --yesno "$1" 10 50
     return $?
 }
@@ -164,6 +168,7 @@ show_error() {
     echo -e "${RED}--- CRITICAL ERROR ---${NC}"
     echo -e "${RED}$1${NC}"
     echo "Check the log file: $LOG_FILE"
+    log "ERROR: $1"
     sleep 5
     dialog --backtitle "${TXT[BACKTITLE]}" --title "${TXT[ERROR]}" --msgbox "$1" 10 70
     exit 1
@@ -178,6 +183,7 @@ get_input() {
     value=$(dialog --backtitle "${TXT[BACKTITLE]}" --title "${TXT[TITLE]}" --inputbox "$prompt" 10 50 "$init_val" 2>&1 1>&3)
     exit_code=$?
     exec 3>&-
+    log "INPUT: $prompt = $value"
     eval $result_var=\$value
     return $exit_code
 }
@@ -190,6 +196,7 @@ get_password() {
     value=$(dialog --backtitle "${TXT[BACKTITLE]}" --title "${TXT[TITLE]}" --insecure --passwordbox "$prompt" 10 50 2>&1 1>&3)
     exit_code=$?
     exec 3>&-
+    log "PASSWORD INPUT: $prompt"
     eval $result_var=\$value
     return $exit_code
 }
@@ -201,6 +208,7 @@ show_progress() {
     local message="$3"
     local percentage=$(( current * 100 / total ))
     
+    log "PROGRESS: $percentage% - $message"
     echo "$percentage" | dialog --backtitle "${TXT[BACKTITLE]}" --title "${TXT[INSTALLING]}" --gauge "$message" 10 70 0
 }
 
@@ -215,6 +223,7 @@ step_language() {
     exec 3>&-
     
     if [[ -z "$LANG_CHOICE" ]]; then exit 1; fi
+    log "Selected language: $LANG_CHOICE"
     set_language "$LANG_CHOICE"
 }
 
@@ -230,6 +239,7 @@ step_profile() {
         "Xorg" "Базовая графическая система (Xorg + драйверы)" 2>&1 1>&3)
     exec 3>&-
     
+    log "Selected profile: $SELECTED_PROFILE"
     if [[ -z "$SELECTED_PROFILE" ]]; then return 1; fi
 }
 
@@ -250,6 +260,7 @@ step_disk() {
     SELECTED_DISK=$(dialog --backtitle "${TXT[BACKTITLE]}" --title "${TXT[DISK_SELECT]}" --menu "${TXT[DISK_WARN]}" 15 60 5 "${disks[@]}" 2>&1 1>&3)
     exec 3>&-
 
+    log "Selected disk: $SELECTED_DISK"
     if [[ -z "$SELECTED_DISK" ]]; then return 1; fi
 }
 
@@ -262,6 +273,7 @@ step_partition_scheme() {
         "3" "${TXT[MANUAL]}" 2>&1 1>&3)
     exec 3>&-
     
+    log "Selected partition scheme: $PARTITION_SCHEME"
     if [[ -z "$PARTITION_SCHEME" ]]; then return 1; fi
 }
 
@@ -279,6 +291,7 @@ step_swap_config() {
     else
         USE_SWAP="false"
     fi
+    log "SWAP size: $SWAP_SIZE_GB GB, Use SWAP: $USE_SWAP"
     return 0
 }
 
@@ -287,6 +300,7 @@ step_swap_config() {
 step_gpu() {
     if [[ "$SELECTED_PROFILE" == "Minimal" ]] || [[ "$SELECTED_PROFILE" == "Server" ]]; then
         GPU_DRIVER="none"
+        log "GPU driver: none (profile: $SELECTED_PROFILE)"
         return 0
     fi
 
@@ -311,6 +325,7 @@ step_gpu() {
     if [[ -n "$AUTO_DRIVER" ]]; then
         show_msg "${TXT[GPU_DETECT]}\n$GPU_INFO\n\nАвтоматически выбран вариант №$AUTO_DRIVER."
         GPU_DRIVER="$AUTO_DRIVER"
+        log "Auto-detected GPU driver: $GPU_DRIVER"
         return 0
     fi
     
@@ -327,12 +342,15 @@ step_gpu() {
         "6" "Generic / VM (VirtualBox, QEMU)" \
         "7" "Skip / Пропустить" 2>&1 1>&3)
     exec 3>&-
+    
+    log "Selected GPU driver: $GPU_DRIVER"
 }
 
 # 5. Выбор DE/WM (только если выбран Desktop)
 step_de() {
     if [[ "$SELECTED_PROFILE" != "Desktop" ]]; then
         CHOSEN_DE="none"
+        log "DE: none (profile: $SELECTED_PROFILE)"
         return 0
     fi
 
@@ -347,6 +365,8 @@ step_de() {
         "sway" "Sway (Wayland Tiling)" \
         "none" "Shell only (No GUI)" 2>&1 1>&3)
     exec 3>&-
+    
+    log "Selected DE: $CHOSEN_DE"
 }
 
 # 6. Раскладки клавиатуры (Живой поиск)
@@ -397,6 +417,8 @@ step_keyboard() {
         "grp:win_space_toggle" "Win+Space" \
         "grp:caps_toggle" "Caps Lock" 2>&1 1>&3)
     exec 3>&-
+    
+    log "Selected keymaps: ${KEYMAPS_SELECTED[*]}, Toggle: $TOGGLE_KEY"
 }
 
 # 7. Настройка системы (Hostname, Users)
@@ -418,6 +440,8 @@ step_system_config() {
         [[ "$USER_PASSWORD" == "$USER_PASSWORD_2" && -n "$USER_PASSWORD" ]] && break
         show_msg "Passwords do not match or empty!"
     done
+    
+    log "Hostname: $TARGET_HOSTNAME, User: $NEW_USER"
 }
 
 # 8. Настройка часового пояса и локали
@@ -482,6 +506,8 @@ step_timezone_locale() {
     exec 3>&-
     
     if [[ -z "$LANG_VAR" ]]; then LANG_VAR="en_US.UTF-8"; fi
+    
+    log "Timezone: $TIMEZONE, LANG: $LANG_VAR, Locales: $LOCALE_GEN_LIST"
 }
 
 # 9. Дополнительные пакеты и опции
@@ -519,6 +545,8 @@ step_packages_extras() {
         AUR_HELPER="yay" # Приоритет Yay, если выбрано оба
         CHOSEN_PACKAGES=$(echo "$CHOSEN_PACKAGES" | sed 's/paru//g')
     fi
+    
+    log "Multilib: $ENABLE_MULTILIB, AUR Helper: $AUR_HELPER, Packages: $CHOSEN_PACKAGES"
 }
 
 # 10. Загрузчик
@@ -536,6 +564,8 @@ step_bootloader() {
         BOOTLOADER="grub" # Grub - дефолт для BIOS
         show_msg "BIOS Detected. Using GRUB."
     fi
+    
+    log "Boot mode: $BOOT_MODE, Bootloader: $BOOTLOADER"
 }
 
 # --- ФУНКЦИИ УСТАНОВКИ (Back-end) ---
@@ -548,15 +578,15 @@ perform_installation() {
 
     # 1. Настройка времени и зеркал
     show_progress 10 1 "Updating system time and mirrorlist..."
-    timedatectl set-ntp true
-    reflector --latest 20 --protocol https --sort rate --save /etc/pacman.d/mirrorlist || show_error "Reflector failed. Check internet connection."
+    timedatectl set-ntp true >> ${LOG_FILE} 2>&1
+    reflector --latest 20 --protocol https --sort rate --save /etc/pacman.d/mirrorlist >> ${LOG_FILE} 2>&1 || show_error "Reflector failed. Check internet connection."
     
     # 2. Партиционирование
     show_progress 10 2 "Partitioning disk $SELECTED_DISK..."
     
     # Очистка диска и сброс монтирований
     umount -R /mnt 2>/dev/null || true
-    wipefs -a "$SELECTED_DISK" || show_error "Failed to wipefs on $SELECTED_DISK."
+    wipefs -a "$SELECTED_DISK" >> ${LOG_FILE} 2>&1 || show_error "Failed to wipefs on $SELECTED_DISK."
 
     # 2.1. Определение префиксов разделов
     if [[ "$SELECTED_DISK" == *"nvme"* ]]; then
@@ -570,15 +600,15 @@ perform_installation() {
     START_MB=1 # Начало диска в MiB (с небольшим смещением)
 
     if [[ "$PARTITION_SCHEME" == "1" ]] || [[ "$PARTITION_SCHEME" == "2" ]]; then
-        parted -s "$SELECTED_DISK" mklabel gpt || show_error "${TXT[ERR_PART]} (mklabel gpt)"
+        parted -s "$SELECTED_DISK" mklabel gpt >> ${LOG_FILE} 2>&1 || show_error "${TXT[ERR_PART]} (mklabel gpt)"
 
         # 2.2. UEFI/BOOT раздел (512 MiB)
         if [[ "$BOOT_MODE" == "UEFI" ]]; then
             local boot_end=$((START_MB + 512))"MiB"
-            parted -s "$SELECTED_DISK" mkpart "EFI" fat32 "$START_MB"MiB "$boot_end" || show_error "${TXT[ERR_PART]} (EFI partition)"
-            parted -s "$SELECTED_DISK" set "$PART_COUNT" esp on
+            parted -s "$SELECTED_DISK" mkpart "EFI" fat32 "$START_MB"MiB "$boot_end" >> ${LOG_FILE} 2>&1 || show_error "${TXT[ERR_PART]} (EFI partition)"
+            parted -s "$SELECTED_DISK" set "$PART_COUNT" esp on >> ${LOG_FILE} 2>&1
             PART_BOOT="${SELECTED_DISK}${PART_PREFIX}${PART_COUNT}"
-            mkfs.fat -F32 "$PART_BOOT" || show_error "${TXT[ERR_PART]} (mkfs EFI)"
+            mkfs.fat -F32 "$PART_BOOT" >> ${LOG_FILE} 2>&1 || show_error "${TXT[ERR_PART]} (mkfs EFI)"
             START_MB=$((START_MB + 513))
             PART_COUNT=$((PART_COUNT + 1))
         fi
@@ -586,35 +616,35 @@ perform_installation() {
         # 2.3. SWAP раздел
         if [[ "$USE_SWAP" == "true" ]]; then
             local swap_end=$((START_MB + (SWAP_SIZE_GB * 1024)))"MiB"
-            parted -s "$SELECTED_DISK" mkpart "SWAP" linux-swap "$START_MB"MiB "$swap_end" || show_error "${TXT[ERR_PART]} (SWAP partition)"
-            parted -s "$SELECTED_DISK" set "$PART_COUNT" swap on
+            parted -s "$SELECTED_DISK" mkpart "SWAP" linux-swap "$START_MB"MiB "$swap_end" >> ${LOG_FILE} 2>&1 || show_error "${TXT[ERR_PART]} (SWAP partition)"
+            parted -s "$SELECTED_DISK" set "$PART_COUNT" swap on >> ${LOG_FILE} 2>&1
             PART_SWAP="${SELECTED_DISK}${PART_PREFIX}${PART_COUNT}"
-            mkswap "$PART_SWAP" || show_error "${TXT[ERR_PART]} (mkswap)"
+            mkswap "$PART_SWAP" >> ${LOG_FILE} 2>&1 || show_error "${TXT[ERR_PART]} (mkswap)"
             START_MB=$((START_MB + (SWAP_SIZE_GB * 1024) + 1))
             PART_COUNT=$((PART_COUNT + 1))
         fi
         
         # 2.4. ROOT раздел (до конца диска)
-        parted -s "$SELECTED_DISK" mkpart "ROOT" "$START_MB"MiB 100% || show_error "${TXT[ERR_PART]} (ROOT partition)"
+        parted -s "$SELECTED_DISK" mkpart "ROOT" "$START_MB"MiB 100% >> ${LOG_FILE} 2>&1 || show_error "${TXT[ERR_PART]} (ROOT partition)"
         PART_ROOT="${SELECTED_DISK}${PART_PREFIX}${PART_COUNT}"
 
         # 2.5. Форматирование ROOT и монтирование
         if [[ "$PARTITION_SCHEME" == "1" ]]; then
-            mkfs.ext4 -F "$PART_ROOT" || show_error "${TXT[ERR_PART]} (mkfs ROOT ext4)"
-            mount "$PART_ROOT" /mnt || show_error "${TXT[ERR_PART]} (mount ROOT ext4)"
+            mkfs.ext4 -F "$PART_ROOT" >> ${LOG_FILE} 2>&1 || show_error "${TXT[ERR_PART]} (mkfs ROOT ext4)"
+            mount "$PART_ROOT" /mnt >> ${LOG_FILE} 2>&1 || show_error "${TXT[ERR_PART]} (mount ROOT ext4)"
         else
-            mkfs.btrfs -f "$PART_ROOT" || show_error "${TXT[ERR_PART]} (mkfs ROOT btrfs)"
-            mount "$PART_ROOT" /mnt || show_error "${TXT[ERR_PART]} (mount ROOT btrfs)"
+            mkfs.btrfs -f "$PART_ROOT" >> ${LOG_FILE} 2>&1 || show_error "${TXT[ERR_PART]} (mkfs ROOT btrfs)"
+            mount "$PART_ROOT" /mnt >> ${LOG_FILE} 2>&1 || show_error "${TXT[ERR_PART]} (mount ROOT btrfs)"
         fi
         
         # 2.6. Монтирование BOOT и активация SWAP
         if [[ "$BOOT_MODE" == "UEFI" ]]; then
             mkdir -p /mnt/boot
-            mount "$PART_BOOT" /mnt/boot || show_error "${TXT[ERR_PART]} (mount BOOT)"
+            mount "$PART_BOOT" /mnt/boot >> ${LOG_FILE} 2>&1 || show_error "${TXT[ERR_PART]} (mount BOOT)"
         fi
 
         if [[ "$USE_SWAP" == "true" ]]; then
-            swapon "$PART_SWAP" || show_error "${TXT[ERR_PART]} (swapon)"
+            swapon "$PART_SWAP" >> ${LOG_FILE} 2>&1 || show_error "${TXT[ERR_PART]} (swapon)"
         fi
         
     elif [[ "$PARTITION_SCHEME" == "3" ]]; then
@@ -640,11 +670,11 @@ perform_installation() {
          base_packages="$base_packages xorg-server xorg-xinit"
     fi
     
-    pacstrap /mnt $base_packages || show_error "${TXT[ERR_PACSTRAP]}"
+    pacstrap /mnt $base_packages >> ${LOG_FILE} 2>&1 || show_error "${TXT[ERR_PACSTRAP]}"
 
     # 4. Fstab
     show_progress 10 4 "Generating fstab..."
-    genfstab -U /mnt >> /mnt/etc/fstab || show_error "Failed to generate fstab."
+    genfstab -U /mnt >> /mnt/etc/fstab 2>> ${LOG_FILE} || show_error "Failed to generate fstab."
 
     # 5. Настройка системы внутри Chroot
     show_progress 10 5 "Creating chroot configuration script..."
@@ -772,7 +802,7 @@ if [[ -n "$AUR_HELPER" ]]; then
 USR_INSTALL
     
     # Если makepkg не сработал, удаляем папку
-    rm -rf $aur_dir
+    rm -rf \$aur_dir
 fi
 
 EOF
@@ -781,7 +811,7 @@ EOF
     chmod +x /mnt/setup_chroot.sh
     
     # Запуск скрипта настройки внутри новой системы
-    arch-chroot /mnt ./setup_chroot.sh || show_error "${TXT[ERR_CHROOT]}"
+    arch-chroot /mnt ./setup_chroot.sh >> ${LOG_FILE} 2>&1 || show_error "${TXT[ERR_CHROOT]}"
     
     # 6. Финальная очистка
     show_progress 10 9 "Final cleanup and logging..."
@@ -797,10 +827,10 @@ main() {
     # ASCII Art
     echo -e "${GREEN}"
     cat << "EOF"
-   /\\
-  /  \\  rc h   L i n u x
- /    \\
-/______\\  Installer
+   /\
+  /  \  rc h   L i n u x
+ /    \
+/______\  Installer
 EOF
     echo -e "${NC}"
     sleep 2
