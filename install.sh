@@ -34,27 +34,31 @@ PART_BOOT=""
 PART_ROOT=""
 PART_SWAP=""
 
+# Установка UTF-8 локали для корректного отображения
+export LANG=en_US.UTF-8
+export LC_ALL=en_US.UTF-8
+
 # Убедимся, что скрипт запущен от root
 if [[ $EUID -ne 0 ]]; then
-   echo -e "${RED}Этот скрипт должен быть запущен с правами root.${NC}"
+   echo -e "${RED}This script must be run as root.${NC}"
    exit 1
 fi
 
 # Проверка наличия dialog, установка если нет
 if ! command -v dialog &> /dev/null; then
-    echo -e "${GREEN}Установка зависимости: dialog...${NC}"
+    echo -e "${GREEN}Installing dependency: dialog...${NC}"
     pacman -Sy --noconfirm dialog &> /dev/null
 fi
 
 # Проверка наличия reflector
 if ! command -v reflector &> /dev/null; then
-    echo -e "${GREEN}Установка зависимости: reflector...${NC}"
+    echo -e "${GREEN}Installing dependency: reflector...${NC}"
     pacman -S --noconfirm reflector &> /dev/null
 fi
 
-# Проверка наличия curl (для загрузки с Pastebin/Gist)
+# Проверка наличия curl
 if ! command -v curl &> /dev/null; then
-    echo -e "${GREEN}Установка зависимости: curl...${NC}"
+    echo -e "${GREEN}Installing dependency: curl...${NC}"
     pacman -S --noconfirm curl &> /dev/null
 fi
 
@@ -372,34 +376,61 @@ step_de() {
 # 6. Раскладки клавиатуры (Живой поиск)
 step_keyboard() {
     KEYMAPS_SELECTED=()
-    local search_term=""
+    
+    # Предопределенный список популярных раскладок
+    local common_layouts=(
+        "us" "English (US)"
+        "ru" "Russian"
+        "de" "German"
+        "fr" "French"
+        "es" "Spanish"
+        "it" "Italian"
+        "pt" "Portuguese"
+        "pl" "Polish"
+        "ua" "Ukrainian"
+        "gb" "English (UK)"
+        "jp" "Japanese"
+        "cn" "Chinese"
+        "kr" "Korean"
+        "br" "Brazilian"
+        "latam" "Latin American"
+        "ara" "Arabic"
+        "tr" "Turkish"
+        "se" "Swedish"
+        "no" "Norwegian"
+        "dk" "Danish"
+        "fi" "Finnish"
+        "cz" "Czech"
+        "sk" "Slovak"
+        "hu" "Hungarian"
+        "ro" "Romanian"
+        "bg" "Bulgarian"
+        "gr" "Greek"
+        "il" "Hebrew"
+        "in" "Indian"
+        "th" "Thai"
+        "vn" "Vietnamese"
+    )
     
     while true; do
-        get_input "${TXT[KEY_SEARCH]}" search_term ""
-        if [[ $? -ne 0 ]]; then break; fi
-
-        local kbd_list_file=$(mktemp)
-        # Используем grep для фильтрации большого списка, что приближает к "живому поиску"
-        localectl list-x11-keymap-layouts | grep -i "$search_term" > "$kbd_list_file"
-        
-        local menu_items=()
-        while read -r line; do
-             menu_items+=("$line" "")
-        done < "$kbd_list_file"
-        rm "$kbd_list_file"
-
-        if [[ ${#menu_items[@]} -eq 0 ]]; then
-            show_msg "Ничего не найдено / Nothing found"
-            continue
-        fi
-
+        # Показываем меню с популярными раскладками
         exec 3>&1
-        local selection=$(dialog --backtitle "${TXT[BACKTITLE]}" --title "${TXT[KEY_SELECT]}" --menu "" 20 50 10 "${menu_items[@]}" 2>&1 1>&3)
+        local selection=$(dialog --backtitle "${TXT[BACKTITLE]}" --title "${TXT[KEY_SELECT]}" \
+            --menu "Select keyboard layout:" 20 50 15 "${common_layouts[@]}" 2>&1 1>&3)
+        local exit_code=$?
         exec 3>&-
+        
+        if [[ $exit_code -ne 0 ]]; then
+            # Если пользователь отменил и не выбрал ни одной раскладки
+            if [[ ${#KEYMAPS_SELECTED[@]} -eq 0 ]]; then
+                KEYMAPS_SELECTED=("us")
+            fi
+            break
+        fi
         
         if [[ -n "$selection" ]]; then
             KEYMAPS_SELECTED+=("$selection")
-            if ! show_yesno "${TXT[KEY_CONFIRM]} ${KEYMAPS_SELECTED[*]}. ${TXT[YES]} - добавить еще, ${TXT[NO]} - продолжить?"; then
+            if ! show_yesno "${TXT[KEY_CONFIRM]} ${KEYMAPS_SELECTED[*]}. Add more layouts?"; then
                 break
             fi
         fi
@@ -411,12 +442,16 @@ step_keyboard() {
     
     # Выбор комбинации переключения
     exec 3>&1
-    TOGGLE_KEY=$(dialog --backtitle "${TXT[BACKTITLE]}" --menu "Toggle combination / Переключение:" 15 50 5 \
+    TOGGLE_KEY=$(dialog --backtitle "${TXT[BACKTITLE]}" --menu "Toggle combination:" 15 50 5 \
         "grp:alt_shift_toggle" "Alt+Shift" \
         "grp:ctrl_shift_toggle" "Ctrl+Shift" \
         "grp:win_space_toggle" "Win+Space" \
         "grp:caps_toggle" "Caps Lock" 2>&1 1>&3)
     exec 3>&-
+    
+    if [[ -z "$TOGGLE_KEY" ]]; then
+        TOGGLE_KEY="grp:alt_shift_toggle"
+    fi
     
     log "Selected keymaps: ${KEYMAPS_SELECTED[*]}, Toggle: $TOGGLE_KEY"
 }
